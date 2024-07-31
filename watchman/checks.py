@@ -3,16 +3,18 @@
 from __future__ import unicode_literals
 
 import uuid
-from os.path import join as joinpath
+from os.path import join
 
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.mail import EmailMessage
 from django.db import connections
+from django.core.exceptions import SuspiciousFileOperation
 
 from watchman import settings as watchman_settings
 from watchman import utils
 from watchman.decorators import check
+
 
 
 def _check_caches(caches):
@@ -61,16 +63,27 @@ def _check_email():
 
 @check
 def _check_storage():
-    filename = joinpath(
-        watchman_settings.WATCHMAN_STORAGE_PATH,
-        "django-watchman-{}.txt".format(uuid.uuid4()),
-    )
-    content = b"django-watchman test file"
-    path = default_storage.save(filename, ContentFile(content))
-    default_storage.size(path)
-    default_storage.open(path).read()
-    default_storage.delete(path)
-    return {"ok": True}
+    try:
+        filename = "django-watchman-{}.txt".format(uuid.uuid4())
+        base_dir = watchman_settings.WATCHMAN_STORAGE_PATH
+        path = safe_join(base_dir, filename)
+
+        # Check that the path is secure and in the authorized directory
+        if not path.startswith(base_dir):
+            raise SuspiciousFileOperation("Attempted road crossing detected.")
+
+        content = b"django-watchman test file"
+        saved_path = default_storage.save(path, ContentFile(content))
+       
+        file_size = default_storage.size(saved_path)
+        file_content = default_storage.open(saved_path).read()
+        default_storage.delete(saved_path)
+        
+        return {"ok": True}
+    except SuspiciousFileOperation:
+        raise SuspiciousFileOperation("Attempted road crossing detected.")
+    except Exception as e:
+        return {"error": str(e)}
 
 
 def caches():
